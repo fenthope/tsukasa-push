@@ -345,19 +345,29 @@ func pushLink(header string) (string, error) {
 	return "", ErrMalformedLink
 }
 
-// splitLinks splits a Link header field into its link values.
+// splitLinks splits a Link header field into its link values. Commas inside
+// a URI reference or a quoted parameter do not separate links (RFC 8288).
 func splitLinks(header string) []string {
 	var links []string
 	depth := 0
+	quoted := false
 	start := 0
 	for i, r := range header {
 		switch r {
-		case '<':
-			depth++
-		case '>':
-			depth--
-		case ',':
+		case '"':
 			if depth == 0 {
+				quoted = !quoted
+			}
+		case '<':
+			if !quoted {
+				depth++
+			}
+		case '>':
+			if !quoted && depth > 0 {
+				depth--
+			}
+		case ',':
+			if depth == 0 && !quoted {
 				links = append(links, header[start:i])
 				start = i + 1
 			}
