@@ -86,6 +86,8 @@ svc.Register(engine)          // 挂载 /subscribe /push/:id /subscription/:id /
 
 限流由 [fenthope/ikumi](https://github.com/fenthope/ikumi)（Touka 速率限制中间件）实现，**只作用于 `/push/:id`**：用户代理的订阅轮询是长连接，不能消耗令牌。默认使用内存令牌桶，可通过 `Store` 换成共享存储实现集群限流。
 
+限流桶默认按**应用服务器的 VAPID 身份**划分，不同的应用服务器互不影响；缺少或伪造 VAPID 凭据的请求回落到客户端 IP，避免用随机 `k` 参数无限开桶。VAPID 验签结果在请求上下文里缓存，限流与 handler 不会重复验签。需要按其他维度限流时设置 `opts.KeyFunc`。
+
 默认使用内存存储；需要持久化时实现 `service.Store` 接口并用 `service.WithStore` 注入。
 
 路由语义：

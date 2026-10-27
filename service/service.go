@@ -84,13 +84,32 @@ func WithSubscriptionTTL(ttl time.Duration) Option {
 // limiter. Application servers are the untrusted part of a push service,
 // RFC 8030 §8.4 describes the denial of service risk they pose.
 //
+// By default the bucket is keyed by the VAPID identity of the application
+// server, so one application server cannot exhaust the budget of another.
+// Requests with missing or invalid VAPID credentials fall back to the client
+// IP: a forged key must not be able to create an unlimited number of
+// buckets. Set opts.KeyFunc to use another dimension.
+//
 // The limiter is not applied to the subscription resource: a user agent
 // holds that request open while it waits for messages and must not consume
 // tokens for it.
 func WithRateLimit(opts ikumi.TokenRateLimiterOptions) Option {
 	return func(s *Service) {
+		if opts.KeyFunc == nil {
+			opts.KeyFunc = s.rateLimitKey
+		}
 		s.rateLimit = ikumi.TokenRateLimit(opts)
 	}
+}
+
+// rateLimitKey derives the rate limit bucket of a push request from the
+// VAPID identity of the application server.
+func (s *Service) rateLimitKey(c *touka.Context) string {
+	verification, err := s.verifyVAPID(c)
+	if err == nil && verification != nil {
+		return "vapid:" + base64.RawURLEncoding.EncodeToString(verification.key)
+	}
+	return "ip:" + c.ClientIP()
 }
 
 // New creates a Service.
@@ -253,23 +272,65 @@ func (s *Service) handlePush(c *touka.Context) {
 	c.Raw(http.StatusCreated, "text/plain; charset=utf-8", nil)
 }
 
+// vapidContextKey is the key under which the VAPID verification of a
+// request is cached in the touka context.
+const vapidContextKey = "tsukasa.vapid"
+
+// vapidVerification is the outcome of a VAPID verification.
+type vapidVerification struct {
+	key []byte // uncompressed public key of the application server
+}
+
+// verifyVAPID validates the VAPID credentials of a request (RFC 8292 §4.2)
+// and caches the result in the context, so the rate limiter and the handler
+// do not verify the same token twice.
+//
+// A request without credentials yields a nil result and no error; only a
+// malformed or invalid credential is an error.
+func (s *Service) verifyVAPID(c *touka.Context) (*vapidVerification, error) {
+	if cached, ok := c.Get(vapidContextKey); ok {
+		result, _ := cached.(vapidResult)
+		return result.verification, result.err
+	}
+	result := s.verifyVAPIDUncached(c)
+	c.Set(vapidContextKey, result)
+	return result.verification, result.err
+}
+
+// vapidResult is the cached outcome of a verification.
+type vapidResult struct {
+	verification *vapidVerification
+	err          error
+}
+
+func (s *Service) verifyVAPIDUncached(c *touka.Context) vapidResult {
+	auth := c.Request.Header.Get("Authorization")
+	if auth == "" {
+		return vapidResult{}
+	}
+	_, pub, err := vapid.Verify(auth, s.origin(c.Request), s.now())
+	if err != nil {
+		return vapidResult{err: err}
+	}
+	return vapidResult{verification: &vapidVerification{key: vapid.PublicKeyBytes(pub)}}
+}
+
 // checkVAPID validates the VAPID credentials of a push request
 // (RFC 8292 §4.2).
 func (s *Service) checkVAPID(c *touka.Context, sub Subscription) error {
-	auth := c.Request.Header.Get("Authorization")
-	if auth == "" {
+	verification, err := s.verifyVAPID(c)
+	if err != nil {
+		s.writeError(c, http.StatusForbidden, "invalid vapid credentials")
+		return err
+	}
+	if verification == nil {
 		if sub.RestrictedKey != nil {
 			s.writeError(c, http.StatusUnauthorized, "vapid credentials required")
 			return errors.New("vapid credentials required")
 		}
 		return nil
 	}
-	_, pub, err := vapid.Verify(auth, s.origin(c.Request), s.now())
-	if err != nil {
-		s.writeError(c, http.StatusForbidden, "invalid vapid credentials")
-		return err
-	}
-	if sub.RestrictedKey != nil && !bytes.Equal(vapid.PublicKeyBytes(pub), sub.RestrictedKey) {
+	if sub.RestrictedKey != nil && !bytes.Equal(verification.key, sub.RestrictedKey) {
 		s.writeError(c, http.StatusForbidden, "vapid key does not match the subscription")
 		return errors.New("vapid key mismatch")
 	}
