@@ -5,7 +5,8 @@ import (
 	"time"
 )
 
-func BenchmarkToken(b *testing.B) {
+func benchmarkSigner(b *testing.B) *Signer {
+	b.Helper()
 	key, err := GenerateKey()
 	if err != nil {
 		b.Fatal(err)
@@ -14,10 +15,24 @@ func BenchmarkToken(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
+	return signer
+}
+
+func BenchmarkToken(b *testing.B) {
+	signer := benchmarkSigner(b)
 	expiry := time.Now().Add(time.Hour)
-	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := signer.Token("https://push.example.net", "mailto:ops@example.com", expiry); err != nil {
+		if _, err := signer.Token("https://push.example.com", "mailto:ops@example.com", expiry); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkAuthorization(b *testing.B) {
+	signer := benchmarkSigner(b)
+	expiry := time.Now().Add(time.Hour)
+	for b.Loop() {
+		if _, err := signer.Authorization("https://push.example.com", "mailto:ops@example.com", expiry); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -32,37 +47,27 @@ func BenchmarkVerifyToken(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	token, err := signer.Token("https://push.example.net", "", time.Now().Add(time.Hour))
+	token, err := signer.Token("https://push.example.com", "mailto:ops@example.com", time.Now().Add(time.Hour))
 	if err != nil {
 		b.Fatal(err)
 	}
-	now := time.Now()
-	b.ReportAllocs()
+	pub := &key.PublicKey
 	for b.Loop() {
-		if _, err := VerifyToken(token, signer.Public(), "https://push.example.net", now); err != nil {
+		if _, err := VerifyToken(token, pub, "https://push.example.com", time.Now()); err != nil {
 			b.Fatal(err)
 		}
 	}
 }
 
-func BenchmarkEncodeDecodeKey(b *testing.B) {
-	key, err := GenerateKey()
+func BenchmarkParseAuthorization(b *testing.B) {
+	signer := benchmarkSigner(b)
+	header, err := signer.Authorization("https://push.example.com", "mailto:ops@example.com", time.Now().Add(time.Hour))
 	if err != nil {
 		b.Fatal(err)
 	}
-	encoded := EncodeKeyB64(&key.PublicKey)
-	b.Run("encode", func(b *testing.B) {
-		for b.Loop() {
-			if EncodeKeyB64(&key.PublicKey) == "" {
-				b.Fatal("empty key")
-			}
+	for b.Loop() {
+		if _, _, err := ParseAuthorization(header); err != nil {
+			b.Fatal(err)
 		}
-	})
-	b.Run("decode", func(b *testing.B) {
-		for b.Loop() {
-			if _, err := DecodeKeyB64(encoded); err != nil {
-				b.Fatal(err)
-			}
-		}
-	})
+	}
 }

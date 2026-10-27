@@ -122,9 +122,31 @@ svc.Register(engine)          // 挂载 /subscribe /push/:id /subscription/:id /
 ```bash
 go test ./...                        # 单元测试 + 端到端测试
 go test -race ./...                  # 并发检查
-go test -bench . ./pushmsg/ ./vapid/ # 基准
 go test -fuzz=FuzzDecrypt -fuzztime=30s ./pushmsg/
 go run ./example                     # 完整闭环演示
 ```
 
 密码学实现以 RFC 8291 §5 与附录 A、RFC 8292 §2.4 的官方测试向量逐字节比对，另有随机往返、篡改、错误密钥与模糊测试。
+
+### 性能基准
+
+基准覆盖加密、验签与端到端推送，用 `benchstat`（`golang.org/x/perf/cmd/benchstat`）做改动前后的对比：
+
+```bash
+# 改动前先采集基线
+go test -run XXX -bench . -benchmem -count 10 ./... > plan/bench/baseline.txt
+
+# 改动后采集并对比
+go test -run XXX -bench . -benchmem -count 10 ./... > plan/bench/current.txt
+benchstat plan/bench/baseline.txt plan/bench/current.txt
+```
+
+| 基准 | 覆盖路径 |
+| --- | --- |
+| `pushmsg`: `GenerateUAKeys` / `Encrypt` / `Decrypt` / `DeriveKeys` | RFC 8291 加解密与密钥派生 |
+| `vapid`: `Token` / `Authorization` / `VerifyToken` / `ParseAuthorization` | RFC 8292 签发与校验 |
+| `sender`: `Send` / `SendWithVAPID` / `SendLargePayload` | 加密 + 签名 + HTTP 往返 |
+| `service`: `HandlePush` / `HandlePoll` | push service 请求与消息投递 |
+| `receiver`: `Poll` / `DecryptOnly` | 用户代理收取与解密 |
+
+耗时指标受机器负载影响较大（本机为共享 CPU，噪声约 ±10%），判断回归以确定性的 `allocs/op` 与 `B/op` 为准，耗时只在同机同负载下对比。
