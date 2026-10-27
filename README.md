@@ -4,7 +4,7 @@ Go 实现的 Web Push SDK：把浏览器/原生端的推送能力拆成四个可
 
 - 模块：`github.com/fenthope/tsukasa-push`，Go 1.27
 - 密码学：纯标准库（`crypto/ecdh`、`crypto/hkdf`、`crypto/aes`+GCM、`crypto/ecdsa`），无第三方密码学依赖
-- HTTP：`github.com/WJQSERVER-STUDIO/httpc`；服务端框架：`github.com/infinite-iroha/touka`
+- HTTP：`github.com/WJQSERVER-STUDIO/httpc`；服务端框架：`github.com/infinite-iroha/touka`；限流：`github.com/fenthope/ikumi`
 - 定位：SDK 而非独立程序，可嵌入自有基础设施；存储通过 `Store` 接口注入
 
 ## 规范映射
@@ -73,9 +73,18 @@ err := app.Send(ctx, appSub, sender.Message{
 
 ```go
 engine := touka.Default()
-svc := service.New(service.WithBaseURL("https://push.example.com"))
+svc := service.New(
+    service.WithBaseURL("https://push.example.com"),
+    // 应用服务器是系统里不受信任的一环（RFC 8030 §8.4），按 IP 限流
+    service.WithRateLimit(ikumi.TokenRateLimiterOptions{
+        Limit: rate.Limit(20),
+        Burst: 40,
+    }),
+)
 svc.Register(engine)          // 挂载 /subscribe /push/:id /subscription/:id /message/:id
 ```
+
+限流由 [fenthope/ikumi](https://github.com/fenthope/ikumi)（Touka 速率限制中间件）实现，**只作用于 `/push/:id`**：用户代理的订阅轮询是长连接，不能消耗令牌。默认使用内存令牌桶，可通过 `Store` 换成共享存储实现集群限流。
 
 默认使用内存存储；需要持久化时实现 `service.Store` 接口并用 `service.WithStore` 注入。
 

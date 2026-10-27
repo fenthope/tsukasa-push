@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/fenthope/ikumi"
 	"github.com/infinite-iroha/touka"
 
 	"github.com/fenthope/tsukasa-push/pushmsg"
@@ -35,6 +36,7 @@ type Service struct {
 	prefix          string
 	subscriptionTTL time.Duration
 	now             func() time.Time
+	rateLimit       touka.HandlerFunc
 }
 
 // Option configures a Service.
@@ -78,6 +80,19 @@ func WithSubscriptionTTL(ttl time.Duration) Option {
 	}
 }
 
+// WithRateLimit protects the push resource with a token bucket rate
+// limiter. Application servers are the untrusted part of a push service,
+// RFC 8030 §8.4 describes the denial of service risk they pose.
+//
+// The limiter is not applied to the subscription resource: a user agent
+// holds that request open while it waits for messages and must not consume
+// tokens for it.
+func WithRateLimit(opts ikumi.TokenRateLimiterOptions) Option {
+	return func(s *Service) {
+		s.rateLimit = ikumi.TokenRateLimit(opts)
+	}
+}
+
 // New creates a Service.
 func New(opts ...Option) *Service {
 	s := &Service{
@@ -102,11 +117,16 @@ func (s *Service) Store() Store { return s.store }
 //	DELETE {prefix}/subscription/:id   remove a subscription
 //	DELETE {prefix}/message/:id        acknowledge a delivered message
 func (s *Service) Register(r touka.Router) {
-	r.POST(s.prefix+"/subscribe", s.handleSubscribe)
-	r.POST(s.prefix+"/push/:id", s.handlePush)
-	r.GET(s.prefix+"/subscription/:id", s.handlePoll)
-	r.DELETE(s.prefix+"/subscription/:id", s.handleUnsubscribe)
-	r.DELETE(s.prefix+"/message/:id", s.handleAck)
+	group := r.Group(s.prefix)
+	if s.rateLimit != nil {
+		group.POST("/push/:id", s.rateLimit, s.handlePush)
+	} else {
+		group.POST("/push/:id", s.handlePush)
+	}
+	group.POST("/subscribe", s.handleSubscribe)
+	group.GET("/subscription/:id", s.handlePoll)
+	group.DELETE("/subscription/:id", s.handleUnsubscribe)
+	group.DELETE("/message/:id", s.handleAck)
 }
 
 // handleSubscribe creates a push message subscription (RFC 8030 §4).
