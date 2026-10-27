@@ -1,0 +1,8 @@
+plan/
+
+# 编译产物
+*.exe
+*.test
+*.out
+/bin/
+/build/
