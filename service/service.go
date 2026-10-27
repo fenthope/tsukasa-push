@@ -469,7 +469,7 @@ func (s *Service) origin(r *http.Request) string {
 // newID returns a random identifier for a resource.
 func newID() string {
 	buf := make([]byte, 16)
-	if _, err := rand.Read(buf); err != nil {
+	if _, err := io.ReadFull(rand.Reader, buf); err != nil {
 		// crypto/rand does not fail in practice; fall back to a time based
 		// identifier rather than panicking in a request handler.
 		return strconv.FormatInt(time.Now().UnixNano(), 36)
