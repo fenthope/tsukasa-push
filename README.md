@@ -117,13 +117,42 @@ svc.Register(engine)          // 挂载 /subscribe /push/:id /subscription/:id /
 - **长轮询会占用连接**：按并发量规划连接数；客户端应设置超时并循环重连。
 - **存储抽象**：`service.Store` 是唯一的持久化切入点，内存实现不保证重启后保留订阅。
 
+## UnifiedPush
+
+UnifiedPush（unifiedpush.org）在应用服务器与推送服务器之间使用 **Web Push**（RFC 8030/8188/8291/8292）：推送消息是 RFC 8291 加密的单记录（1–4096 字节），鉴权用 VAPID（RFC 8292）。因此 `tsukasapush` 的 `sender` 包可以直接向 UnifiedPush 端点发送消息，无需新协议。
+
+`upush/` 包是一层薄封装，把 UnifiedPush 注册信息（端点、P-256 公钥、auth secret）转换为 `pushmsg.Subscription`，并通过 `sender.Send` 投递：
+
+```go
+sub := &upush.Subscription{
+    Endpoint:  endpoint,        // 来自分发器的 Web Push capability URL
+    P256DHB64: p256dhB64,       // 客户端加密公钥，base64url
+    AuthB64:   authB64,         // 16 字节认证密钥，base64url
+}
+if err := sub.Validate(); err != nil {
+    log.Fatalf("invalid subscription: %v", err)
+}
+
+snd := sender.New(sender.WithVAPID(signer, "mailto:ops@example.com"))
+if err := upush.Push(ctx, snd, sub, sender.Message{
+    Payload: payload,
+    TTL:     60,
+    Urgency: pushmsg.UrgencyHigh,
+}); err != nil {
+    log.Fatalf("push: %v", err)
+}
+```
+
+端设备侧的接收由 UnifiedPush 连接器库负责，不在本 Go SDK 范围内。完整演示见 `go run ./example/upush`。
+
 ## 开发
 
 ```bash
 go test ./...                        # 单元测试 + 端到端测试
 go test -race ./...                  # 并发检查
 go test -fuzz=FuzzDecrypt -fuzztime=30s ./pushmsg/
-go run ./example                     # 完整闭环演示
+go run ./example                     # Web Push 完整闭环演示
+go run ./example/upush               # UnifiedPush 闭环演示
 ```
 
 密码学实现以 RFC 8291 §5 与附录 A、RFC 8292 §2.4 的官方测试向量逐字节比对，另有随机往返、篡改、错误密钥与模糊测试。
@@ -148,5 +177,6 @@ benchstat plan/bench/baseline.txt plan/bench/current.txt
 | `sender`: `Send` / `SendWithVAPID` / `SendLargePayload` | 加密 + 签名 + HTTP 往返 |
 | `service`: `HandlePush` / `HandlePoll` | push service 请求与消息投递 |
 | `receiver`: `Poll` / `DecryptOnly` | 用户代理收取与解密 |
+| `upush`: `Push` / `Subscription.Validate` | UnifiedPush 端点投递（Web Push 上层） |
 
 耗时指标受机器负载影响较大（本机为共享 CPU，噪声约 ±10%），判断回归以确定性的 `allocs/op` 与 `B/op` 为准，耗时只在同机同负载下对比。
