@@ -12,12 +12,24 @@ package main
 import (
 	"fmt"
 	"log"
+	"net/http"
+	_ "net/http/pprof"
 
 	"github.com/fenthope/tsukasa-push/pushmsg"
 	"github.com/fenthope/tsukasa-push/upush/device"
 )
 
 func main() {
+	// Expose pprof on localhost:6060 for CPU/memory profiling:
+	//   go tool pprof http://localhost:6060/debug/pprof/profile
+	//   go tool pprof http://localhost:6060/debug/pprof/heap
+	go func() {
+		log.Println("pprof listening on http://localhost:6060/debug/pprof/")
+		if err := http.ListenAndServe("localhost:6060", nil); err != nil {
+			log.Fatalf("pprof server: %v", err)
+		}
+	}()
+
 	// 1. The device generates a subscription with fresh key material.
 	// The endpoint and connection token come from the UnifiedPush
 	// distributor during registration.
@@ -40,22 +52,28 @@ func main() {
 	// server out of band.
 	recv := device.NewReceiver(sub)
 
-	// 3. The application server encrypts a message for this device using
-	// the device's public key and auth secret. (This step happens on the
-	// server, not the device; it is shown here for a complete round trip.)
-	payload := []byte(`{"title":"device-demo","body":"hello device"}`)
-	body, err := pushmsg.Encrypt(payload, sub.AuthSecret, sub.Public)
-	if err != nil {
-		log.Fatalf("encrypt: %v", err)
+	// 3. Simulate a stream of incoming encrypted messages from the
+	// distributor. In production these arrive via Android broadcast
+	// intents or Linux D-Bus.
+	for i := 0; i < 100; i++ {
+		payload := []byte(fmt.Sprintf(`{"msg":%d,"body":"hello device"}`, i))
+		body, err := pushmsg.Encrypt(payload, sub.AuthSecret, sub.Public)
+		if err != nil {
+			log.Fatalf("encrypt: %v", err)
+		}
+
+		// 4. Decrypt the message on the device side.
+		plain, err := recv.Decrypt(body)
+		if err != nil {
+			log.Fatalf("decrypt: %v", err)
+		}
+		if string(plain) != string(payload) {
+			log.Fatalf("decrypted payload mismatch: %q", plain)
+		}
 	}
 
-	// 4. The device receives the encrypted bytes from the distributor and
-	// decrypts them. This is the UnifiedPush end-device receiving path.
-	plain, err := recv.Decrypt(body)
-	if err != nil {
-		log.Fatalf("decrypt: %v", err)
-	}
-	fmt.Printf("received: %s\n", plain)
-
-	log.Printf("connection token: %s", sub.ConnectionToken)
+	log.Printf("decrypted 100 messages; connection token: %s", sub.ConnectionToken)
+	log.Println("profile endpoints: http://localhost:6060/debug/pprof/")
+	// Keep the process alive so pprof can be attached.
+	select {}
 }

@@ -14,11 +14,16 @@ package device
 
 import (
 	"crypto/ecdh"
+	"encoding/base64"
 	"errors"
 	"fmt"
 
 	"github.com/fenthope/tsukasa-push/pushmsg"
 )
+
+// curve is the P-256 curve used for key generation. Cached at package
+// level to avoid repeated lookups.
+var curve = ecdh.P256()
 
 // Subscription is a device-side push subscription. It holds the Web Push
 // endpoint provided by a UnifiedPush distributor together with the key
@@ -50,6 +55,11 @@ type Subscription struct {
 	// AuthSecret is the 16-byte authentication secret used in key
 	// derivation (RFC 8291 §3.2).
 	AuthSecret []byte
+
+	// publicKeyBytes is the uncompressed encoding of Public, computed once
+	// at construction time and reused for every decryption to avoid
+	// recomputing the point encoding on each message.
+	publicKeyBytes []byte
 }
 
 // Validate checks the subscription for internal consistency.
@@ -68,6 +78,13 @@ func (s *Subscription) Validate() error {
 			pushmsg.AuthSecretSize, len(s.AuthSecret))
 	}
 	return nil
+}
+
+// PublicKeyB64 returns the base64url-encoded uncompressed P-256 public key,
+// suitable for sharing with the application server out of band. The result
+// is computed once at construction time and cached.
+func (s *Subscription) PublicKeyB64() string {
+	return base64.RawURLEncoding.EncodeToString(s.publicKeyBytes)
 }
 
 // Receiver decrypts incoming UnifiedPush push messages for a device
@@ -111,5 +128,6 @@ func GenerateSubscription(endpoint, connectionToken, distributor string) (*Subsc
 		Public:          keys.Public,
 		Private:         keys.Private,
 		AuthSecret:      keys.AuthSecret,
+		publicKeyBytes:  keys.Public.Bytes(),
 	}, nil
 }
