@@ -5,7 +5,8 @@ go 1.27
 require (
 	github.com/WJQSERVER-STUDIO/httpc v0.10.0
 	github.com/fenthope/ikumi v0.1.0
-	github.com/infinite-iroha/touka v1.1.0
+	github.com/infinite-iroha/touka v1.1.1
+	golang.org/x/time v0.15.0
 )
 
 require (
@@ -15,5 +16,4 @@ require (
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	golang.org/x/net v0.61.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
-	golang.org/x/time v0.15.0 // indirect
 )
