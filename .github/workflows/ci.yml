@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.27'
+          check-latest: true
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Check formatting
+        run: |
+          if [ -n "$(gofmt -l .)" ]; then
+            echo "The following files are not gofmt-compliant:"
+            gofmt -l .
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Run tests with race detector
+        run: go test -race -timeout 300s ./...
+
+      - name: Run benchmarks (baseline capture)
+        run: go test -run XXX -bench . -benchmem -count 6 ./... > bench-current.txt || true
+
+      - name: Upload benchmark artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bench-current
+          path: bench-current.txt
+          retention-days: 7
