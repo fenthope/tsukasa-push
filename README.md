@@ -121,6 +121,8 @@ svc.Register(engine)          // 挂载 /subscribe /push/:id /subscription/:id /
 
 UnifiedPush（unifiedpush.org）在应用服务器与推送服务器之间使用 **Web Push**（RFC 8030/8188/8291/8292）：推送消息是 RFC 8291 加密的单记录（1–4096 字节），鉴权用 VAPID（RFC 8292）。因此 `tsukasapush` 的 `sender` 包可以直接向 UnifiedPush 端点发送消息，无需新协议。
 
+### 应用服务器（发送）
+
 `upush/` 包是一层薄封装，把 UnifiedPush 注册信息（端点、P-256 公钥、auth secret）转换为 `pushmsg.Subscription`，并通过 `sender.Send` 投递：
 
 ```go
@@ -143,7 +145,25 @@ if err := upush.Push(ctx, snd, sub, sender.Message{
 }
 ```
 
-端设备侧的接收由 UnifiedPush 连接器库负责，不在本 Go SDK 范围内。完整演示见 `go run ./example/upush`。
+### 端设备（接收）
+
+`upush/device/` 包提供端设备侧的接收能力：订阅管理与消息解密。分发器通过 Android 广播意图或 Linux D-Bus 将加密字节送到设备，本 SDK 负责解密（RFC 8291），传输层由嵌入方自行处理：
+
+```go
+// 设备生成订阅（端点和连接令牌来自分发器）
+sub, err := device.GenerateSubscription(endpoint, connectionToken, distributor)
+if err := sub.Validate(); err != nil {
+    log.Fatalf("validate: %v", err)
+}
+
+// 私钥留在设备上，公钥和端点对外发给应用服务器
+recv := device.NewReceiver(sub)
+
+// 收到分发器下发的加密字节后解密
+plain, err := recv.Decrypt(encryptedBytes)
+```
+
+完整演示见 `go run ./example/upush`（发送端）与 `go run ./example/device`（接收端）。
 
 ## 开发
 
@@ -152,7 +172,8 @@ go test ./...                        # 单元测试 + 端到端测试
 go test -race ./...                  # 并发检查
 go test -fuzz=FuzzDecrypt -fuzztime=30s ./pushmsg/
 go run ./example                     # Web Push 完整闭环演示
-go run ./example/upush               # UnifiedPush 闭环演示
+go run ./example/upush               # UnifiedPush 发送端演示
+go run ./example/device              # UnifiedPush 接收端演示
 ```
 
 密码学实现以 RFC 8291 §5 与附录 A、RFC 8292 §2.4 的官方测试向量逐字节比对，另有随机往返、篡改、错误密钥与模糊测试。
