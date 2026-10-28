@@ -33,10 +33,14 @@ var (
 // checked per RFC 8291 §4).
 const paddingDelimiter = 0x02
 
+// curve is the P-256 curve used for all ECDH key agreement. Cached at
+// package level to avoid repeated lookups on every encrypt/decrypt.
+var curve = ecdh.P256()
+
 // NewPublicKey parses an uncompressed P-256 public key, validating that the
 // point lies on the curve.
 func NewPublicKey(raw []byte) (*ecdh.PublicKey, error) {
-	pub, err := ecdh.P256().NewPublicKey(raw)
+	pub, err := curve.NewPublicKey(raw)
 	if err != nil {
 		return nil, fmt.Errorf("pushmsg: invalid P-256 public key: %w", err)
 	}
@@ -45,7 +49,7 @@ func NewPublicKey(raw []byte) (*ecdh.PublicKey, error) {
 
 // NewPrivateKey parses a raw P-256 private key.
 func NewPrivateKey(raw []byte) (*ecdh.PrivateKey, error) {
-	priv, err := ecdh.P256().NewPrivateKey(raw)
+	priv, err := curve.NewPrivateKey(raw)
 	if err != nil {
 		return nil, fmt.Errorf("pushmsg: invalid P-256 private key: %w", err)
 	}
@@ -55,7 +59,7 @@ func NewPrivateKey(raw []byte) (*ecdh.PrivateKey, error) {
 // GenerateUAKeys creates a fresh P-256 key pair and authentication secret
 // for a subscription (RFC 8291 §3.1, §3.2).
 func GenerateUAKeys() (*UAKeys, error) {
-	private, err := ecdh.P256().GenerateKey(rand.Reader)
+	private, err := curve.GenerateKey(rand.Reader)
 	if err != nil {
 		return nil, fmt.Errorf("pushmsg: generating ECDH key: %w", err)
 	}
@@ -119,7 +123,7 @@ func deriveKeys(ecdhSecret, authSecret, salt, uaPublic, senderPublic []byte) (de
 // Encrypt encrypts plaintext for the holder of uaPublic as a single-record
 // aes128gcm body, generating an ephemeral sender key pair and salt.
 func Encrypt(plaintext, authSecret []byte, uaPublic *ecdh.PublicKey) ([]byte, error) {
-	sender, err := ecdh.P256().GenerateKey(rand.Reader)
+	sender, err := curve.GenerateKey(rand.Reader)
 	if err != nil {
 		return nil, fmt.Errorf("pushmsg: generating sender key: %w", err)
 	}
@@ -186,7 +190,7 @@ func Decrypt(body, authSecret []byte, uaPrivate *ecdh.PrivateKey) ([]byte, error
 		return nil, ErrMalformed
 	}
 	salt := body[:16]
-	senderPublic, err := ecdh.P256().NewPublicKey(body[21 : 21+KeyIDSize])
+	senderPublic, err := curve.NewPublicKey(body[21 : 21+KeyIDSize])
 	if err != nil {
 		return nil, fmt.Errorf("pushmsg: sender key: %w", err)
 	}
@@ -196,7 +200,8 @@ func Decrypt(body, authSecret []byte, uaPrivate *ecdh.PrivateKey) ([]byte, error
 	if err != nil {
 		return nil, fmt.Errorf("pushmsg: ecdh: %w", err)
 	}
-	d, err := deriveKeys(shared, authSecret, salt, uaPrivate.PublicKey().Bytes(), senderPublic.Bytes())
+	senderPublicBytes := senderPublic.Bytes()
+	d, err := deriveKeys(shared, authSecret, salt, uaPrivate.PublicKey().Bytes(), senderPublicBytes)
 	if err != nil {
 		return nil, err
 	}

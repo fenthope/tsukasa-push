@@ -40,7 +40,7 @@ func ParseSubscription(data []byte) (*Subscription, error) {
 	if err != nil {
 		return nil, fmt.Errorf("pushmsg: p256dh encoding: %w", err)
 	}
-	pub, err := ecdh.P256().NewPublicKey(raw)
+	pub, err := curve.NewPublicKey(raw)
 	if err != nil {
 		return nil, fmt.Errorf("pushmsg: p256dh point: %w", err)
 	}
