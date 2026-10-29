@@ -15,7 +15,7 @@ Go 实现的 Web Push SDK：把浏览器/原生端的推送能力拆成四个可
 | RFC 8030 §5 | 推送投递（TTL 必填、201 + Location） | `sender.Send` / `service.handlePush` |
 | RFC 8030 §5.2 | TTL 语义（含 0 TTL 仅在 UA 在线时投递） | `pushmsg.ParseTTL` / `service.MemoryStore.Enqueue` |
 | RFC 8030 §5.3 | Urgency / Topic | `pushmsg.Urgency` / `pushmsg.ValidTopic` |
-| RFC 8030 §6 | UA 接收消息 | `receiver.Poll` / `service.handlePoll` |
+| RFC 8030 §6 | UA 接收消息 | `receiver.Poll` / `receiver.PollRaw` / `service.handlePoll` |
 | RFC 8030 §6.2 | 消息确认（DELETE 消息资源） | `receiver.Ack` / `service.handleAck` |
 | RFC 8030 §7.3 | 订阅过期（404 + `TTL-Expired`） | `service.handlePoll` / `service.handlePush` |
 | RFC 8188 | aes128gcm 记录格式（86 字节头、AAD 为空） | `pushmsg.Encrypt` / `pushmsg.Decrypt` |
@@ -53,7 +53,20 @@ for {
 }
 ```
 
-`Subscription` 可直接 JSON 序列化保存（内含私钥，务必加密存储）。
+`KeyedSubscription` 可直接 JSON 序列化保存（内含私钥，务必加密存储）。续约时可用 `ua.Subscribe(ctx, receiver.WithExistingKeys(keys))` 复用既有密钥对。
+
+### 分发器/连接器（只转发密文）
+
+`receiver` 区分两种角色，由类型系统强制：终端持钥解密（`KeyedSubscription` + `Poll`），分发器零密钥、只转发密文（`Subscription` + `PollRaw`）。分发器上不存在任何解密路径，端到端边界由类型保证：
+
+```go
+d, err := receiver.New("https://push.example.com")
+sub, err := d.SubscribeBare(ctx)                 // 无密钥订阅，把 PushURI 交给各应用
+
+raw, err := d.PollRaw(ctx, sub)                  // 长轮询，返回密文
+// 把 raw.Body 转发给对应的应用，应用用自己的私钥 pushmsg.Decrypt
+d.Ack(ctx, raw)                                  // Ack 同时接受密文与明文消息
+```
 
 ### 应用服务器（发送端）
 

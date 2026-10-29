@@ -35,12 +35,12 @@ func TestSubscriptionKeysRejectBrokenFields(t *testing.T) {
 	validPriv := base64.RawURLEncoding.EncodeToString(keys.Private.Bytes())
 
 	// A broken public key encoding.
-	sub := &Subscription{P256DH: "!!!", Auth: validAuth, PrivateKey: validPriv}
+	sub := &KeyedSubscription{P256DH: "!!!", Auth: validAuth, PrivateKey: validPriv}
 	if _, err := sub.Keys(); err == nil || !strings.Contains(err.Error(), "p256dh") {
 		t.Errorf("want a p256dh error, got %v", err)
 	}
 	// A broken auth encoding.
-	sub = &Subscription{P256DH: valid, Auth: "!!!", PrivateKey: validPriv}
+	sub = &KeyedSubscription{P256DH: valid, Auth: "!!!", PrivateKey: validPriv}
 	if _, err := sub.Keys(); err == nil || !strings.Contains(err.Error(), "auth") {
 		t.Errorf("want an auth error, got %v", err)
 	}

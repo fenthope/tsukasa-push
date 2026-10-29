@@ -4,6 +4,7 @@
 package e2e_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"net/http/httptest"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/infinite-iroha/touka"
 
+	"github.com/fenthope/tsukasa-push/pushmsg"
 	"github.com/fenthope/tsukasa-push/receiver"
 	"github.com/fenthope/tsukasa-push/sender"
 	"github.com/fenthope/tsukasa-push/service"
@@ -167,5 +169,71 @@ func TestEndToEndQueuedMessageIsDeliveredLater(t *testing.T) {
 	}
 	if string(msg.Payload) != "queued" {
 		t.Errorf("payload = %q", msg.Payload)
+	}
+}
+
+// TestEndToEndDistributorRelaysCiphertext models the connector/distributor
+// role: it holds a bare subscription with no key material, relays the raw
+// ciphertext to the application it serves, and the application — which
+// provisioned the keys out of band — decrypts locally. The distributor
+// never sees the plaintext, preserving the end-to-end boundary.
+func TestEndToEndDistributorRelaysCiphertext(t *testing.T) {
+	serviceURL := newPushService(t)
+
+	// The application provisioned its own key material out of band; the
+	// distributor never holds it.
+	appKeys, err := pushmsg.GenerateUAKeys()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	distributor, err := receiver.New(serviceURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sub, err := distributor.SubscribeBare(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The application server encrypts to the push endpoint with the
+	// application's own keys, then delivers to the shared push resource.
+	app := sender.New()
+	appSub := &pushmsg.Subscription{
+		Endpoint:   sub.PushURI,
+		Public:     appKeys.Public,
+		AuthSecret: appKeys.AuthSecret,
+	}
+	payload := []byte("top secret")
+	if err := app.Send(context.Background(), appSub, sender.Message{Payload: payload, TTL: 60}); err != nil {
+		t.Fatal(err)
+	}
+
+	// The distributor polls the raw ciphertext — it cannot decrypt it.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	raw, err := distributor.PollRaw(ctx, sub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(raw.Body, payload) {
+		t.Error("ciphertext leaks the plaintext payload")
+	}
+	if raw.URI == "" {
+		t.Error("missing message URI")
+	}
+
+	// The application decrypts with its own private key.
+	plain, err := pushmsg.Decrypt(raw.Body, appKeys.AuthSecret, appKeys.Private)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(plain) != string(payload) {
+		t.Errorf("payload = %q", plain)
+	}
+
+	// The distributor acknowledges the relayed message.
+	if err := distributor.Ack(context.Background(), raw); err != nil {
+		t.Fatal(err)
 	}
 }

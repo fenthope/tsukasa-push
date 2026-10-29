@@ -30,19 +30,21 @@ func testSigner(t *testing.T) *vapid.Signer {
 
 // mockSubscription builds a subscription with valid key material for the
 // mock server tests.
-func mockSubscription(t *testing.T, base string) (*Subscription, *pushmsg.UAKeys) {
+func mockSubscription(t *testing.T, base string) (*KeyedSubscription, *pushmsg.UAKeys) {
 	t.Helper()
 	keys, err := pushmsg.GenerateUAKeys()
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &Subscription{
-		ServiceURL:      base,
-		SubscriptionURI: base + "/subscription/abc",
-		PushURI:         base + "/push/abc",
-		P256DH:          base64.RawURLEncoding.EncodeToString(keys.Public.Bytes()),
-		Auth:            base64.RawURLEncoding.EncodeToString(keys.AuthSecret),
-		PrivateKey:      base64.RawURLEncoding.EncodeToString(keys.Private.Bytes()),
+	return &KeyedSubscription{
+		Subscription: Subscription{
+			ServiceURL:      base,
+			SubscriptionURI: base + "/subscription/abc",
+			PushURI:         base + "/push/abc",
+		},
+		P256DH:     base64.RawURLEncoding.EncodeToString(keys.Public.Bytes()),
+		Auth:       base64.RawURLEncoding.EncodeToString(keys.AuthSecret),
+		PrivateKey: base64.RawURLEncoding.EncodeToString(keys.Private.Bytes()),
 	}, keys
 }
 
@@ -281,18 +283,18 @@ func TestSplitLinksHandlesNestedCommas(t *testing.T) {
 }
 
 func TestSubscriptionKeysRejectGarbage(t *testing.T) {
-	sub := &Subscription{P256DH: "!!!", Auth: "!!!", PrivateKey: "!!!"}
+	sub := &KeyedSubscription{P256DH: "!!!", Auth: "!!!", PrivateKey: "!!!"}
 	if _, err := sub.Keys(); err == nil {
 		t.Error("garbage keys must be rejected")
 	}
-	sub = &Subscription{P256DH: base64.RawURLEncoding.EncodeToString(make([]byte, 65)), Auth: "AA", PrivateKey: "AA"}
+	sub = &KeyedSubscription{P256DH: base64.RawURLEncoding.EncodeToString(make([]byte, 65)), Auth: "AA", PrivateKey: "AA"}
 	if _, err := sub.Keys(); err == nil {
 		t.Error("invalid point must be rejected")
 	}
 }
 
 func TestAppSubscriptionRejectsGarbage(t *testing.T) {
-	sub := &Subscription{P256DH: "!!!", Auth: "AA", PrivateKey: "AA"}
+	sub := &KeyedSubscription{P256DH: "!!!", Auth: "AA", PrivateKey: "AA"}
 	if _, err := sub.AppSubscription(); err == nil {
 		t.Error("garbage keys must be rejected")
 	}
