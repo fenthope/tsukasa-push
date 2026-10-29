@@ -81,7 +81,7 @@ type messageResource interface {
 	messageURI() string
 }
 
-func (m *Message) messageURI() string { return m.URI }
+func (m *Message) messageURI() string    { return m.URI }
 func (m *RawMessage) messageURI() string { return m.URI }
 
 // KeyedSubscription is a subscription together with the user agent key
