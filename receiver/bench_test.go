@@ -31,13 +31,15 @@ func BenchmarkPoll(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	sub := &Subscription{
-		ServiceURL:      srv.URL,
-		SubscriptionURI: srv.URL + "/subscription/abc",
-		PushURI:         srv.URL + "/push/abc",
-		P256DH:          base64.RawURLEncoding.EncodeToString(keys.Public.Bytes()),
-		Auth:            base64.RawURLEncoding.EncodeToString(keys.AuthSecret),
-		PrivateKey:      base64.RawURLEncoding.EncodeToString(keys.Private.Bytes()),
+	sub := &KeyedSubscription{
+		Subscription: Subscription{
+			ServiceURL:      srv.URL,
+			SubscriptionURI: srv.URL + "/subscription/abc",
+			PushURI:         srv.URL + "/push/abc",
+		},
+		P256DH:     base64.RawURLEncoding.EncodeToString(keys.Public.Bytes()),
+		Auth:       base64.RawURLEncoding.EncodeToString(keys.AuthSecret),
+		PrivateKey: base64.RawURLEncoding.EncodeToString(keys.Private.Bytes()),
 	}
 	ctx := context.Background()
 	b.SetBytes(1024)

@@ -134,7 +134,7 @@ func TestSubscriptionJSONRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var back Subscription
+	var back KeyedSubscription
 	if err := json.Unmarshal(data, &back); err != nil {
 		t.Fatal(err)
 	}
